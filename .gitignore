@@ -1,0 +1,7 @@
+.env
+.env.*
+models/
+*.gguf
+*.hgn
+__pycache__/
+*.pyc

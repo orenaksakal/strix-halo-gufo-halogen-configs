@@ -1,0 +1,123 @@
+# Runtime settings used for the September 28, 2026 single-task comparison.
+# Select one profile: docker compose --profile gufo up -d
+#                 or docker compose --profile halogen up -d
+name: flash-next-comparison
+
+x-runtime: &runtime
+  user: "${HOST_UID:?Set HOST_UID}:${HOST_GID:?Set HOST_GID}"
+  # Both devices share one group on the tested host. If yours differ, add
+  # the second numeric GID here once; Compose rejects duplicate list entries.
+  group_add:
+    - "${GPU_GID:?Set GPU_GID}"
+  devices:
+    - /dev/kfd:/dev/kfd
+    - /dev/dri:/dev/dri
+  ipc: host
+  ulimits:
+    memlock:
+      soft: -1
+      hard: -1
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: 30m
+      max-file: "3"
+  restart: unless-stopped
+  stop_grace_period: 120s
+
+services:
+  gufo:
+    <<: *runtime
+    profiles: [gufo]
+    # Local source build, not a publicly pullable image. See build-gufo.sh.
+    image: gufo-local:982bffea-rocm10
+    pull_policy: never
+    ports:
+      - "127.0.0.1:${API_PORT:-18080}:18080"
+    volumes:
+      - type: bind
+        source: "${MODELS_DIR:?Set MODELS_DIR}"
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+    command:
+      - gufo
+      - serve
+      - --host
+      - 0.0.0.0
+      - --port
+      - "18080"
+      - --sessions
+      - "3"
+      - llm
+      - --model
+      - /models/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
+      - --served-model-name
+      - flash-next
+      - --context
+      - "126000"
+      - --max-tokens
+      - "126000"
+      - --think
+      - "on"
+      - --temperature
+      - "1.0"
+      - --top-p
+      - "0.95"
+      - --top-k
+      - "20"
+      - --max-pending
+      - "4"
+      - --speculative
+      - mtp
+      - --mtp-model
+      - /models/MTP/mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf
+      - --draft-tokens
+      - "4"
+
+  halogen:
+    <<: *runtime
+    profiles: [halogen]
+    # Published 0.14.2 image, pinned to the digest actually tested.
+    image: ghcr.io/peonist-ai/halogen-flash-server@sha256:f3f99aa48f3a051f18da9ee24b333ca108fe745773fd036a365fe1875871d0be
+    ports:
+      - "127.0.0.1:${API_PORT:-18080}:8731"
+    volumes:
+      - type: bind
+        source: "${MODELS_DIR:?Set MODELS_DIR}"
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${HALOGEN_SUPPORT_DIR:?Set HALOGEN_SUPPORT_DIR}"
+        target: /support
+        read_only: true
+        bind:
+          create_host_path: false
+    environment:
+      HALOGEN_CHECKPOINT: /models/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
+      HALOGEN_TOKENIZER: /support/tokenizer
+      HALOGEN_MTP_HEAD: /support/qwen38-flash-next-mtp.hgn
+      HALOGEN_MODEL_ID: flash-next
+      HALOGEN_CTX: "126000"
+      HALOGEN_KV_SLOTS: "3"
+      # Three independently 256-aligned 126K regions: 3 * 126208.
+      HALOGEN_KV_POOL_POSITIONS: "378624"
+      HALOGEN_KV_POOL_FIT: "0"
+      HALOGEN_MAX_TOK: "8192"
+      HALOGEN_PREFILL_CHUNK: "8192"
+      HALOGEN_WEIGHTS_LOCK: "1"
+      HALOGEN_FLASH_PIN_TRUNK: "1"
+      HALOGEN_TEMPERATURE: "1.0"
+      HALOGEN_TOP_P: "0.95"
+      HALOGEN_TOP_K: "20"
+      HALOGEN_ENABLE_THINKING: "1"
+      HALOGEN_THINKING_ANSWER_ROOM: "0"
+      HALOGEN_MAX_TOKENS_DEFAULT: "32768"
+      HALOGEN_MAX_TOKENS_CAP: "126000"
+      HALOGEN_ENGINE_WAIT_S: "900"
+      HOME: /tmp
